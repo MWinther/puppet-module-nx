@@ -1,0 +1,85 @@
+#!/bin/bash
+# Evens out users on NX cluster. Should be run from cron.
+# This file is maintained by puppet. Manual changes will be overwritten.
+# Jonathan Bower /// ejonbow
+PATH=/sbin:/usr/bin:/bin:/usr/NX/bin:$PATH
+
+# The maxium difference between higest and lowest node
+max_diff=2
+
+# Mail notification. yes/no
+notify=no
+
+# Mail notifcation user
+notify_user=ejonbow
+
+# Put on ramdisk if available
+if [ -d /ramdisk ] ; then
+  tmpfile=/ramdisk/nxbalance.out
+else
+  tmpfile=/tmp/nxbalance.out
+fi
+domain=`dnsdomainname`
+
+# Make sure tmpfile is empty
+> $tmpfile
+
+# Collect nodes and sessions on nodes, and put in $tmpfile
+session_dir="/usr/NX/var/db/running"
+if [ ! -s /usr/NX/etc/nodes.db ] ; then exit 0 ; fi
+for i in `cat /usr/NX/etc/nodes.db | cut -d, -f2 | cut -d: -f1 | cut -d. -f1` ; do
+  if [ ! "`ls $session_dir/sessionId* 2>/dev/null`" ] ; then echo "ERROR: No sessions found" ; exit 1; fi
+  num_sessions=`grep $i $session_dir/sessionId* | wc -l`
+  echo $num_sessions $i >> $tmpfile
+done
+
+# Number of sessions on the node with the fewest sessions
+lowest=`cat $tmpfile | sort -n | head -n1 | awk {'print $1'}`
+# Number of sessions on the node with the most sessions
+highest=`cat $tmpfile | sort -rn | head -n1 | awk {'print $1'}`
+# The difference between them
+let diff=highest-lowest
+
+# Ensure all nodes with fewest sessions are started.
+for i in `grep "^$lowest " $tmpfile | awk '{print $2}'` ; do
+  if [ `grep $i /usr/NX/etc/nodes.db | grep stopped` ] ; then
+    nxserver --start ${i}.${domain}:22 >/dev/null
+    if [ "$notify" == "yes" ] ; then
+    su - $notify_user -c "echo Started $i on $HOSTNAME. $lowest sessions on lowest node. $highest sessions on highest node. | mail $notify_user -s "nxbalance.sh on $HOSTNAME""
+    fi
+    logger "Started $i"
+  fi
+done
+
+# If the difference is too high, stop nodes.
+if [ "$diff" -gt $max_diff ] ; then 
+  # Remove lowest from tempfile so its not processed.
+  sed -i "/^$lowest\ /d" $tmpfile
+  for i in `cat $tmpfile | awk '{print $2}'` ; do
+    if [ `grep $i /usr/NX/etc/nodes.db | grep running` ] ; then
+      num=`grep $i $tmpfile | awk '{print $1}'`
+      let num_diff=num-lowest
+      # Only stop the node if the difference is more than 1
+      if [ "$num_diff" -gt 1 ] ; then 
+        nxserver --stop ${i}.${domain}:22 >/dev/null
+        if [ "$notify" == "yes" ] ; then
+        su - $notify_user -c "echo Stopped $i with $num sessions on $HOSTNAME. $lowest sessions on lowest node. $highest sessions on highest node. | mail $notify_user -s "nxbalance.sh on $HOSTNAME""
+        fi
+        logger "Stopped $i"
+      fi 
+    fi
+  done
+  # Or make sure all nodes are started.
+  else
+    for i in `cat $tmpfile | awk '{print $2}'` ; do
+    if [ `grep $i /usr/NX/etc/nodes.db | grep stopped` ] ; then
+      nxserver --start ${i}.${domain}:22 >/dev/null
+      if [ "$notify" == "yes" ] ; then
+      su - $notify_user -c "echo Started $i on $HOSTNAME. $lowest sessions on lowest node. $highest sessions on highest node. | mail $notify_user -s "nxbalance.sh on $HOSTNAME""
+      fi
+      logger "Started $i"
+    fi
+  done
+fi
+
+rm $tmpfile

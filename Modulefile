@@ -1,0 +1,8 @@
+name    'puppet-module-nx'
+version '1.1.0-beta'
+source  'git://github.com/nyren/puppet-module-nx.git'
+author  'nyren'
+license 'Apache License, Version 2.0'
+summary 'Manage NoMachine NX servers'
+description 'Installs and configures a NoMachine NX server in either standalone, master and node mode'
+project_page 'https://github.com/nyren/puppet-module-nx'

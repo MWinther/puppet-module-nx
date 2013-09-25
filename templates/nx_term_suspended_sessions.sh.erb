@@ -1,0 +1,37 @@
+#!/bin/bash
+# This file is maintained by puppet. Manual changes will be overwritten.
+# Terminate old suspended NX sessions
+# Jonathan Bower /// ejonbow
+PATH=/sbin:/usr/bin:/bin:/usr/NX/bin:$PATH
+
+# Number of days before terminating a suspended session
+keep=$1
+[ "$keep" ] || keep=<%= @terminate_session_days %>
+
+# "keep" must be at least one day
+[ -n "$keep" -a "$keep" -gt 0 ] || exit 0
+
+tmpfile=`mktemp`
+
+# Collect suspended sessions to $tmpfile
+nxserver --history | grep Suspended > "$tmpfile"
+
+# Terminate if no old sessions were found
+if [ ! -s "$tmpfile" ] ; then
+  rm -f "$tmpfile"
+fi
+
+# Removing everything exept the days to keep.
+while [ $keep -ge 0 ]
+do
+  date=`date -d "$keep days ago" +%F`
+  sed -i "/$date/d" "$tmpfile"
+  keep=$[$keep-1]
+done
+
+for i in `cat $tmpfile | awk '{print $4}'`
+do
+  nxserver --terminate $i >/dev/null
+done
+
+rm -f "$tmpfile"
